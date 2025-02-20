@@ -39,7 +39,7 @@
             height: 100,
             speed: 5,
             health: 100,
-            maxHealth: 100, // Added for health bar scaling
+            maxHealth: 100,
             shootingLaser: false,
             shootingRocket: false,
             shootingBaby: false,
@@ -78,17 +78,43 @@
         const babyImage = new Image();
         babyImage.src = 'images/baby.jpg';
         const ketamineImage = new Image();
-        ketamineImage.src = 'images/ketamine.png'; // New: Add this image
+        ketamineImage.src = 'images/ketamine.png';
 
-        // Load sound
+        // Load sounds
         const hitSound = new Audio('audio/elon_hit.mp3');
+        hitSound.playbackRate = 2; // Speed up by 3x
+        hitSound.volume = 0.9;
+        const damageSound = new Audio('audio/elon_damaged.mp3'); // New sound for when hit
+        damageSound.volume = 0.2
 
         let score = 0;
         let enemies = [];
         let particles = [];
         let rockets = [];
         let babies = [];
-        let ketamine = null; // Single power-up at a time
+        let ketamine = null;
+        const elonSayings = [
+            "I think it is possible for ordinary people to choose to be extraordinary.",
+            "When something is important enough, you do it even if the odds are not in your favor.",
+            "Persistence is very important. You should not give up unless you are forced to give up.",
+            "The first step is to establish that something is possible; then probability will occur.",
+            "I could either watch it happen or be a part of it."
+        ];
+        let lastTriggerHealth = elon.maxHealth;
+        let healthWarningTimer = 0;
+        const stars = [];
+        for (let i = 0; i < 100; i++) {
+            stars.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                size: Math.random() * 2 + 1,
+                opacity: Math.random()
+            });
+        }
+        let hitFlashTimer = 0;
+        let lastScoreMilestone = 0;
+        let currentSaying = "";
+        let sayingTimer = 0;
         const agencies = ['USAID', 'IRS', 'CIA', 'FTC', 'CFTC'];
 
         // Controls
@@ -131,8 +157,8 @@
             constructor(x, y, direction) {
                 this.x = x;
                 this.y = y;
-                this.width = 30;
-                this.height = 30;
+                this.width = 80; // Scaled up from 30
+                this.height = 80; // Scaled up from 30
                 this.speed = 8;
                 this.direction = direction;
             }
@@ -158,8 +184,8 @@
             constructor(x, y, direction) {
                 this.x = x;
                 this.y = y;
-                this.width = 30;
-                this.height = 30;
+                this.width = 80; // Scaled up from 30
+                this.height = 80; // Scaled up from 30
                 this.speed = 6;
                 this.direction = direction;
             }
@@ -235,7 +261,14 @@
 
                 if (this.collidesWith(elon)) {
                     elon.health -= 1;
+                    if (elon.health <= lastTriggerHealth - 5) {
+                        lastTriggerHealth -= 5;
+                        healthWarningTimer = 120; // 2 seconds at 60fps
+                    }
+                    hitFlashTimer = 10; // ~0.17 seconds at 60fps
                     this.createExplosion();
+                    if (!damageSound.paused) damageSound.currentTime = 0; // Rewind if playing
+                    else damageSound.play(); // Play only if not already playing
                     enemies = enemies.filter(e => e !== this);
                 }
             }
@@ -268,46 +301,67 @@
             }
         }
 
-        // Laser effect
         function drawLaser() {
-            const mouthX = elon.x + elon.width / 2;
-            const mouthY = elon.y + elon.height / 4;
-            const laserLength = Math.max(canvas.width, canvas.height);
-            const endX = mouthX + elon.lastDirection.x * laserLength;
-            const endY = mouthY + elon.lastDirection.y * laserLength;
+    const mouthX = elon.x + elon.width / 2;
+    const mouthY = elon.y + elon.height / 4;
+    const laserLength = Math.max(canvas.width, canvas.height);
 
-            const gradient = ctx.createLinearGradient(mouthX, mouthY, endX, endY);
-            gradient.addColorStop(0, 'rgba(255, 0, 0, 1)');
-            gradient.addColorStop(0.5, 'rgba(255, 100, 100, 0.8)');
-            gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+    // Calculate direction (diagonal or fallback to lastDirection)
+    let directionX = 0;
+    let directionY = 0;
+    const keyCount = (keys['w'] ? 1 : 0) + (keys['s'] ? 1 : 0) + (keys['a'] ? 1 : 0) + (keys['d'] ? 1 : 0);
 
-            ctx.shadowBlur = 20;
-            ctx.shadowColor = 'red';
-            ctx.strokeStyle = gradient;
-            ctx.lineWidth = 6;
-            ctx.beginPath();
-            ctx.moveTo(mouthX, mouthY);
-            ctx.lineTo(endX, endY);
-            ctx.stroke();
-            ctx.shadowBlur = 0;
+    if (keyCount === 2) {
+        if (keys['w'] && keys['a']) { directionX = -1; directionY = -1; }
+        else if (keys['w'] && keys['d']) { directionX = 1; directionY = -1; }
+        else if (keys['s'] && keys['a']) { directionX = -1; directionY = 1; }
+        else if (keys['s'] && keys['d']) { directionX = 1; directionY = 1; }
+        // Normalize diagonal direction
+        const magnitude = Math.sqrt(directionX * directionX + directionY * directionY);
+        directionX = magnitude > 0 ? directionX / magnitude : elon.lastDirection.x;
+        directionY = magnitude > 0 ? directionY / magnitude : elon.lastDirection.y;
+    } else {
+        // Fallback to lastDirection if no valid direction
+        directionX = elon.lastDirection.x;
+        directionY = elon.lastDirection.y;
+    }
 
-            for (let i = 0; i < 5; i++) {
-                const t = Math.random();
-                const px = mouthX + (endX - mouthX) * t;
-                const py = mouthY + (endY - mouthY) * t;
-                particles.push(new Particle(
-                    px,
-                    py,
-                    '#ff0000',
-                    Math.random() * 2 + 1,
-                    (Math.random() - 0.5) * 2,
-                    (Math.random() - 0.5) * 2,
-                    10 + Math.random() * 10
-                ));
-            }
+    // Ensure finite values
+    const endX = isFinite(mouthX + directionX * laserLength) ? mouthX + directionX * laserLength : mouthX;
+    const endY = isFinite(mouthY + directionY * laserLength) ? mouthY + directionY * laserLength : mouthY;
 
-            return { mouthX, mouthY, endX, endY };
-        }
+    const gradient = ctx.createLinearGradient(mouthX, mouthY, endX, endY);
+    gradient.addColorStop(0, 'rgba(255, 0, 0, 1)');
+    gradient.addColorStop(0.5, 'rgba(255, 100, 100, 0.8)');
+    gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = 'red';
+    ctx.strokeStyle = gradient;
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(mouthX, mouthY);
+    ctx.lineTo(endX, endY);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    for (let i = 0; i < 5; i++) {
+        const t = Math.random();
+        const px = mouthX + (endX - mouthX) * t;
+        const py = mouthY + (endY - mouthY) * t;
+        particles.push(new Particle(
+            px,
+            py,
+            '#ff0000',
+            Math.random() * 2 + 1,
+            (Math.random() - 0.5) * 2,
+            (Math.random() - 0.5) * 2,
+            10 + Math.random() * 10
+        ));
+    }
+
+    return { mouthX, mouthY, endX, endY };
+}
 
         // Draw health bar
         function drawHealthBar() {
@@ -316,16 +370,11 @@
             const x = 10;
             const y = canvas.height - 30;
 
-            // Background (empty bar)
             ctx.fillStyle = 'gray';
             ctx.fillRect(x, y, barWidth, barHeight);
-
-            // Health fill
             const healthWidth = (elon.health / elon.maxHealth) * barWidth;
             ctx.fillStyle = 'red';
             ctx.fillRect(x, y, healthWidth, barHeight);
-
-            // Border
             ctx.strokeStyle = 'white';
             ctx.lineWidth = 2;
             ctx.strokeRect(x, y, barWidth, barHeight);
@@ -335,23 +384,33 @@
         function gameLoop() {
             ctx.fillStyle = 'black';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            stars.forEach(star => {
+                ctx.globalAlpha = star.opacity;
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+                ctx.fill();
+                star.opacity += (Math.random() - 0.5) * 0.1; // Twinkle effect
+                star.opacity = Math.max(0.1, Math.min(1, star.opacity)); // Clamp between 0.1 and 1
+            });
+            ctx.globalAlpha = 1; // Reset alpha
 
-            // Handle movement
+            // Handle movement and direction
             if (keys['w'] && elon.y > 0) {
                 elon.y -= elon.speed;
-                elon.lastDirection = { x: 0, y: -1 };
+                if (!keys['a'] && !keys['d'] && !keys['s']) elon.lastDirection = { x: 0, y: -1 };
             }
             if (keys['s'] && elon.y < canvas.height - elon.height) {
                 elon.y += elon.speed;
-                elon.lastDirection = { x: 0, y: 1 };
+                if (!keys['a'] && !keys['d'] && !keys['w']) elon.lastDirection = { x: 0, y: 1 };
             }
             if (keys['a'] && elon.x > 0) {
                 elon.x -= elon.speed;
-                elon.lastDirection = { x: -1, y: 0 };
+                if (!keys['w'] && !keys['s'] && !keys['d']) elon.lastDirection = { x: -1, y: 0 };
             }
             if (keys['d'] && elon.x < canvas.width - elon.width) {
                 elon.x += elon.speed;
-                elon.lastDirection = { x: 1, y: 0 };
+                if (!keys['w'] && !keys['s'] && !keys['a']) elon.lastDirection = { x: 1, y: 0 };
             }
             elon.shootingLaser = keys[' '];
             elon.shootingRocket = keys['l'] && !rockets.length;
@@ -372,8 +431,7 @@
                     if (laserHit) {
                         score += 10;
                         scoreDisplay.textContent = `Score: ${score}`;
-                        hitSound.currentTime = 0;
-                        hitSound.play();
+                        if (hitSound.paused) hitSound.play(); // Play only if not playing
                         return false;
                     }
                     return true;
@@ -391,8 +449,7 @@
                     if (rocket.collidesWith(enemy)) {
                         score += 20;
                         scoreDisplay.textContent = `Score: ${score}`;
-                        hitSound.currentTime = 0;
-                        hitSound.play();
+                        if (hitSound.paused) hitSound.play();
                         return false;
                     }
                     return true;
@@ -411,8 +468,7 @@
                     if (baby.collidesWith(enemy)) {
                         score += 15;
                         scoreDisplay.textContent = `Score: ${score}`;
-                        hitSound.currentTime = 0;
-                        hitSound.play();
+                        if (hitSound.paused) hitSound.play();
                         return false;
                     }
                     return true;
@@ -425,15 +481,15 @@
                 enemies.push(new Enemy());
             }
 
-            // Spawn ketamine power-up (rare)
-            if (!ketamine && Math.random() < 0.005) { // 0.5% chance per frame
+            // Spawn ketamine power-up
+            if (!ketamine && Math.random() < 0.005) {
                 ketamine = new Ketamine();
             }
             if (ketamine) {
                 ketamine.draw();
                 if (ketamine.collidesWith(elon)) {
                     elon.health = elon.maxHealth;
-                    ketamine = null; // Remove power-up after collection
+                    ketamine = null;
                 }
             }
 
@@ -449,9 +505,42 @@
                 p.update();
                 p.draw();
             });
+            if (score >= lastScoreMilestone + 100) {
+                lastScoreMilestone += 100;
+                currentSaying = elonSayings[Math.floor(Math.random() * elonSayings.length)];
+                sayingTimer = 180; // 3 seconds at 60fps
+            }
+
+            if (hitFlashTimer > 0) {
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                hitFlashTimer--;
+            }
 
             // Draw health bar
             drawHealthBar();
+
+            if (sayingTimer > 0) {
+                let alpha = 1;
+                if (sayingTimer < 30) {
+                    alpha = sayingTimer / 30; // Fade in over first 0.5s
+                } else if (sayingTimer > 150) {
+                    alpha = (180 - sayingTimer) / 30; // Fade out over last 0.5s
+                }
+                ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                ctx.font = '30px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(currentSaying, canvas.width / 2, canvas.height / 2);
+                sayingTimer--;
+            }
+
+            if (healthWarningTimer > 0) {
+                ctx.fillStyle = 'white';
+                ctx.font = '20px Arial';
+                ctx.textAlign = 'left';
+                ctx.fillText('concerning!', 10, canvas.height - 40);
+                healthWarningTimer--;
+            }
 
             // Game over check
             if (elon.health <= 0) {
@@ -484,7 +573,7 @@
 
         // Start game when images are loaded
         let imagesLoaded = 0;
-        const totalImages = 10; // 9 previous + ketamine
+        const totalImages = 10;
         function checkImagesLoaded() {
             imagesLoaded++;
             if (imagesLoaded === totalImages) {
@@ -508,6 +597,7 @@
         ketamineImage.onerror = () => console.error('Failed to load ketamine.png');
         Object.values(agencyImages).forEach(img => img.onerror = () => console.error(`Failed to load ${img.src}`));
         hitSound.onerror = () => console.error('Failed to load elon_hit.mp3');
+        damageSound.onerror = () => console.error('Failed to load elon_damaged.mp3');
     </script>
 </body>
 </html>
