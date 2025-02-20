@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Elon vs Agencies</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+        }
+        #gameCanvas {
+            display: block;
+        }
+        #score {
+            position: absolute;
+            color: white;
+            font-family: Arial;
+            font-size: 20px;
+            z-index: 10;
+            top: 10px;
+            left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="score">Score: 0</div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('score');
+
+        // Game objects
+        const elon = {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+            speed: 5,
+            health: 100,
+            maxHealth: 100, // Added for health bar scaling
+            shootingLaser: false,
+            shootingRocket: false,
+            shootingBaby: false,
+            lastDirection: { x: 0, y: -1 }
+        };
+
+        // Set canvas to full screen and position Elon
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            elon.x = canvas.width / 2 - elon.width / 2;
+            elon.y = canvas.height / 2 - elon.height / 2;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Load images
+        const elonNormal = new Image();
+        elonNormal.src = 'images/elon_normal.jpg';
+        const elonShooting = new Image();
+        elonShooting.src = 'images/elon_normal.jpg';
+        const agencyImages = {
+            'USAID': new Image(),
+            'IRS': new Image(),
+            'CIA': new Image(),
+            'FTC': new Image(),
+            'CFTC': new Image()
+        };
+        agencyImages['USAID'].src = 'images/usaid.png';
+        agencyImages['IRS'].src = 'images/irs.png';
+        agencyImages['CIA'].src = 'images/cia.svg';
+        agencyImages['FTC'].src = 'images/fbi.png';
+        agencyImages['CFTC'].src = 'images/cftc.png';
+        const rocketImage = new Image();
+        rocketImage.src = 'images/spacex.jpg';
+        const babyImage = new Image();
+        babyImage.src = 'images/baby.jpg';
+        const ketamineImage = new Image();
+        ketamineImage.src = 'images/ketamine.png'; // New: Add this image
+
+        // Load sound
+        const hitSound = new Audio('audio/elon_hit.mp3');
+
+        let score = 0;
+        let enemies = [];
+        let particles = [];
+        let rockets = [];
+        let babies = [];
+        let ketamine = null; // Single power-up at a time
+        const agencies = ['USAID', 'IRS', 'CIA', 'FTC', 'CFTC'];
+
+        // Controls
+        const keys = {};
+        window.addEventListener('keydown', (e) => keys[e.key] = true);
+        window.addEventListener('keyup', (e) => keys[e.key] = false);
+
+        // Particle class
+        class Particle {
+            constructor(x, y, color, size, speedX, speedY, life) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.size = size;
+                this.speedX = speedX;
+                this.speedY = speedY;
+                this.life = life;
+                this.maxLife = life;
+            }
+
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                this.life -= 1;
+                this.speedX *= 0.98;
+                this.speedY *= 0.98;
+            }
+
+            draw() {
+                const alpha = this.life / this.maxLife;
+                ctx.fillStyle = `${this.color}${Math.floor(alpha * 255).toString(16).padStart(2, '0')}`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Projectile classes
+        class Rocket {
+            constructor(x, y, direction) {
+                this.x = x;
+                this.y = y;
+                this.width = 30;
+                this.height = 30;
+                this.speed = 8;
+                this.direction = direction;
+            }
+
+            update() {
+                this.x += this.direction.x * this.speed;
+                this.y += this.direction.y * this.speed;
+            }
+
+            draw() {
+                ctx.drawImage(rocketImage, this.x, this.y, this.width, this.height);
+            }
+
+            collidesWith(obj) {
+                return this.x < obj.x + obj.width &&
+                       this.x + this.width > obj.x &&
+                       this.y < obj.y + obj.height &&
+                       this.y + this.height > obj.y;
+            }
+        }
+
+        class Baby {
+            constructor(x, y, direction) {
+                this.x = x;
+                this.y = y;
+                this.width = 30;
+                this.height = 30;
+                this.speed = 6;
+                this.direction = direction;
+            }
+
+            update() {
+                this.x += this.direction.x * this.speed;
+                this.y += this.direction.y * this.speed;
+            }
+
+            draw() {
+                ctx.drawImage(babyImage, this.x, this.y, this.width, this.height);
+            }
+
+            collidesWith(obj) {
+                return this.x < obj.x + obj.width &&
+                       this.x + this.width > obj.x &&
+                       this.y < obj.y + obj.height &&
+                       this.y + this.height > obj.y;
+            }
+        }
+
+        // Ketamine power-up class
+        class Ketamine {
+            constructor() {
+                this.x = Math.random() * (canvas.width - 40);
+                this.y = Math.random() * (canvas.height - 40);
+                this.width = 40;
+                this.height = 40;
+            }
+
+            draw() {
+                ctx.drawImage(ketamineImage, this.x, this.y, this.width, this.height);
+            }
+
+            collidesWith(obj) {
+                return this.x < obj.x + obj.width &&
+                       this.x + this.width > obj.x &&
+                       this.y < obj.y + obj.height &&
+                       this.y + this.height > obj.y;
+            }
+        }
+
+        // Enemy class
+        class Enemy {
+            constructor() {
+                const side = Math.floor(Math.random() * 4);
+                this.width = 80;
+                this.height = 80;
+                this.speed = 2 + Math.random() * 2;
+
+                if (side === 0) { // top
+                    this.x = Math.random() * canvas.width;
+                    this.y = -this.height;
+                } else if (side === 1) { // right
+                    this.x = canvas.width + this.width;
+                    this.y = Math.random() * canvas.height;
+                } else if (side === 2) { // bottom
+                    this.x = Math.random() * canvas.width;
+                    this.y = canvas.height + this.height;
+                } else { // left
+                    this.x = -this.width;
+                    this.y = Math.random() * canvas.height;
+                }
+                this.name = agencies[Math.floor(Math.random() * agencies.length)];
+            }
+
+            update() {
+                const dx = elon.x - this.x;
+                const dy = elon.y - this.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                this.x += (dx / distance) * this.speed;
+                this.y += (dy / distance) * this.speed;
+
+                if (this.collidesWith(elon)) {
+                    elon.health -= 1;
+                    this.createExplosion();
+                    enemies = enemies.filter(e => e !== this);
+                }
+            }
+
+            collidesWith(obj) {
+                return this.x < obj.x + obj.width &&
+                       this.x + this.width > obj.x &&
+                       this.y < obj.y + obj.height &&
+                       this.y + this.height > obj.y;
+            }
+
+            createExplosion() {
+                for (let i = 0; i < 20; i++) {
+                    const speedX = (Math.random() - 0.5) * 8;
+                    const speedY = (Math.random() - 0.5) * 8;
+                    particles.push(new Particle(
+                        this.x + this.width / 2,
+                        this.y + this.height / 2,
+                        '#ff4500',
+                        Math.random() * 4 + 2,
+                        speedX,
+                        speedY,
+                        30 + Math.random() * 20
+                    ));
+                }
+            }
+
+            draw() {
+                ctx.drawImage(agencyImages[this.name], this.x, this.y, this.width, this.height);
+            }
+        }
+
+        // Laser effect
+        function drawLaser() {
+            const mouthX = elon.x + elon.width / 2;
+            const mouthY = elon.y + elon.height / 4;
+            const laserLength = Math.max(canvas.width, canvas.height);
+            const endX = mouthX + elon.lastDirection.x * laserLength;
+            const endY = mouthY + elon.lastDirection.y * laserLength;
+
+            const gradient = ctx.createLinearGradient(mouthX, mouthY, endX, endY);
+            gradient.addColorStop(0, 'rgba(255, 0, 0, 1)');
+            gradient.addColorStop(0.5, 'rgba(255, 100, 100, 0.8)');
+            gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = 'red';
+            ctx.strokeStyle = gradient;
+            ctx.lineWidth = 6;
+            ctx.beginPath();
+            ctx.moveTo(mouthX, mouthY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            for (let i = 0; i < 5; i++) {
+                const t = Math.random();
+                const px = mouthX + (endX - mouthX) * t;
+                const py = mouthY + (endY - mouthY) * t;
+                particles.push(new Particle(
+                    px,
+                    py,
+                    '#ff0000',
+                    Math.random() * 2 + 1,
+                    (Math.random() - 0.5) * 2,
+                    (Math.random() - 0.5) * 2,
+                    10 + Math.random() * 10
+                ));
+            }
+
+            return { mouthX, mouthY, endX, endY };
+        }
+
+        // Draw health bar
+        function drawHealthBar() {
+            const barWidth = 200;
+            const barHeight = 20;
+            const x = 10;
+            const y = canvas.height - 30;
+
+            // Background (empty bar)
+            ctx.fillStyle = 'gray';
+            ctx.fillRect(x, y, barWidth, barHeight);
+
+            // Health fill
+            const healthWidth = (elon.health / elon.maxHealth) * barWidth;
+            ctx.fillStyle = 'red';
+            ctx.fillRect(x, y, healthWidth, barHeight);
+
+            // Border
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, barWidth, barHeight);
+        }
+
+        // Game loop
+        function gameLoop() {
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Handle movement
+            if (keys['w'] && elon.y > 0) {
+                elon.y -= elon.speed;
+                elon.lastDirection = { x: 0, y: -1 };
+            }
+            if (keys['s'] && elon.y < canvas.height - elon.height) {
+                elon.y += elon.speed;
+                elon.lastDirection = { x: 0, y: 1 };
+            }
+            if (keys['a'] && elon.x > 0) {
+                elon.x -= elon.speed;
+                elon.lastDirection = { x: -1, y: 0 };
+            }
+            if (keys['d'] && elon.x < canvas.width - elon.width) {
+                elon.x += elon.speed;
+                elon.lastDirection = { x: 1, y: 0 };
+            }
+            elon.shootingLaser = keys[' '];
+            elon.shootingRocket = keys['l'] && !rockets.length;
+            elon.shootingBaby = keys['k'] && !babies.length;
+
+            // Draw Elon
+            const elonImage = elon.shootingLaser ? elonShooting : elonNormal;
+            ctx.drawImage(elonImage, elon.x, elon.y, elon.width, elon.height);
+
+            // Draw laser and check hits
+            if (elon.shootingLaser) {
+                const { mouthX, mouthY, endX, endY } = drawLaser();
+                enemies = enemies.filter(enemy => {
+                    const laserHit = lineRectIntersect(
+                        mouthX, mouthY, endX, endY,
+                        enemy.x, enemy.y, enemy.width, enemy.height
+                    );
+                    if (laserHit) {
+                        score += 10;
+                        scoreDisplay.textContent = `Score: ${score}`;
+                        hitSound.currentTime = 0;
+                        hitSound.play();
+                        return false;
+                    }
+                    return true;
+                });
+            }
+
+            // Handle rocket
+            if (elon.shootingRocket) {
+                rockets.push(new Rocket(elon.x + elon.width / 2, elon.y + elon.height / 4, { ...elon.lastDirection }));
+            }
+            rockets.forEach(rocket => {
+                rocket.update();
+                rocket.draw();
+                enemies = enemies.filter(enemy => {
+                    if (rocket.collidesWith(enemy)) {
+                        score += 20;
+                        scoreDisplay.textContent = `Score: ${score}`;
+                        hitSound.currentTime = 0;
+                        hitSound.play();
+                        return false;
+                    }
+                    return true;
+                });
+            });
+            rockets = rockets.filter(r => r.x >= 0 && r.x <= canvas.width && r.y >= 0 && r.y <= canvas.height);
+
+            // Handle baby
+            if (elon.shootingBaby) {
+                babies.push(new Baby(elon.x + elon.width / 2, elon.y + elon.height / 4, { ...elon.lastDirection }));
+            }
+            babies.forEach(baby => {
+                baby.update();
+                baby.draw();
+                enemies = enemies.filter(enemy => {
+                    if (baby.collidesWith(enemy)) {
+                        score += 15;
+                        scoreDisplay.textContent = `Score: ${score}`;
+                        hitSound.currentTime = 0;
+                        hitSound.play();
+                        return false;
+                    }
+                    return true;
+                });
+            });
+            babies = babies.filter(b => b.x >= 0 && b.x <= canvas.width && b.y >= 0 && b.y <= canvas.height);
+
+            // Spawn enemies
+            if (Math.random() < 0.02) {
+                enemies.push(new Enemy());
+            }
+
+            // Spawn ketamine power-up (rare)
+            if (!ketamine && Math.random() < 0.005) { // 0.5% chance per frame
+                ketamine = new Ketamine();
+            }
+            if (ketamine) {
+                ketamine.draw();
+                if (ketamine.collidesWith(elon)) {
+                    elon.health = elon.maxHealth;
+                    ketamine = null; // Remove power-up after collection
+                }
+            }
+
+            // Update and draw enemies
+            enemies.forEach(enemy => {
+                enemy.update();
+                enemy.draw();
+            });
+
+            // Update and draw particles
+            particles = particles.filter(p => p.life > 0);
+            particles.forEach(p => {
+                p.update();
+                p.draw();
+            });
+
+            // Draw health bar
+            drawHealthBar();
+
+            // Game over check
+            if (elon.health <= 0) {
+                ctx.fillStyle = 'white';
+                ctx.font = '40px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2);
+                return;
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Line-rectangle intersection
+        function lineRectIntersect(x1, y1, x2, y2, rx, ry, rw, rh) {
+            const left = lineLineIntersect(x1, y1, x2, y2, rx, ry, rx, ry + rh);
+            const right = lineLineIntersect(x1, y1, x2, y2, rx + rw, ry, rx + rw, ry + rh);
+            const top = lineLineIntersect(x1, y1, x2, y2, rx, ry, rx + rw, ry);
+            const bottom = lineLineIntersect(x1, y1, x2, y2, rx, ry + rh, rx + rw, ry + rh);
+            return left || right || top || bottom;
+        }
+
+        function lineLineIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
+            const denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
+            if (denom === 0) return false;
+            const ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denom;
+            const ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denom;
+            return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
+        }
+
+        // Start game when images are loaded
+        let imagesLoaded = 0;
+        const totalImages = 10; // 9 previous + ketamine
+        function checkImagesLoaded() {
+            imagesLoaded++;
+            if (imagesLoaded === totalImages) {
+                gameLoop();
+            } else {
+                console.log(`Loaded ${imagesLoaded} of ${totalImages} images`);
+            }
+        }
+
+        elonNormal.onload = checkImagesLoaded;
+        elonShooting.onload = checkImagesLoaded;
+        rocketImage.onload = checkImagesLoaded;
+        babyImage.onload = checkImagesLoaded;
+        ketamineImage.onload = checkImagesLoaded;
+        Object.values(agencyImages).forEach(img => img.onload = checkImagesLoaded);
+
+        elonNormal.onerror = () => console.error('Failed to load elon_normal.jpg');
+        elonShooting.onerror = () => console.error('Failed to load elon_shooting.jpg');
+        rocketImage.onerror = () => console.error('Failed to load rocket.png');
+        babyImage.onerror = () => console.error('Failed to load baby.png');
+        ketamineImage.onerror = () => console.error('Failed to load ketamine.png');
+        Object.values(agencyImages).forEach(img => img.onerror = () => console.error(`Failed to load ${img.src}`));
+        hitSound.onerror = () => console.error('Failed to load elon_hit.mp3');
+    </script>
+</body>
+</html>
